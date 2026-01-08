@@ -5,7 +5,8 @@ interface PixelGridProps {
   grid: PixelData[];
   gridSize: number; // e.g., 32
   activeColorIndex: number;
-  onPaintPixels: (indices: number[]) => void; // Changed from single index to array
+  onPaintPixels: (indices: number[]) => void;
+  onPaintStrokeStart?: () => void; // Optional for optimization
   palette: string[];
   hintPixelIndex: number | null;
   difficulty: 'easy' | 'medium' | 'hard';
@@ -94,6 +95,7 @@ export const PixelGrid: React.FC<PixelGridProps> = ({
   gridSize, 
   activeColorIndex, 
   onPaintPixels,
+  onPaintStrokeStart,
   palette,
   hintPixelIndex,
   difficulty
@@ -327,6 +329,7 @@ export const PixelGrid: React.FC<PixelGridProps> = ({
     
     // Paint immediately if 1 finger and paint mode
     if (activePointers.current.size === 1 && mode === 'paint') {
+      onPaintStrokeStart?.(); // Signal start of stroke (save history)
       const indices = getIndicesFromBrush(e.clientX, e.clientY);
       if (indices.length > 0) {
         onPaintPixels(indices);

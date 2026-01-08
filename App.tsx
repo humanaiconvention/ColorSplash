@@ -12,7 +12,7 @@ import { recordFeedback, recordSave, getPromptModifiers, getProfileStats, should
 // --- Constants & Data ---
 
 const COOLDOWN_MS = 10000; // 10 seconds cooldown
-const APP_VERSION = "v1.30";
+const APP_VERSION = "v1.31";
 const STORAGE_KEY_TRANSPARENT = 'colorsplash_transparent_mode';
 
 const STYLES = [
@@ -629,11 +629,25 @@ const App: React.FC = () => {
     setTimeout(() => setHintPixelIndex(null), 3000);
   };
 
+  // Called when a stroke begins (pointer down). Saves history snapshot.
+  const handlePaintStrokeStart = useCallback(() => {
+    const currentState = gameStateRef.current;
+    if (currentState.stage !== 'playing') return;
+
+    setPast(prev => [...prev, { 
+        grid: currentState.grid, 
+        activeColorIndex: currentState.activeColorIndex, 
+        unlockedColorIndex: currentState.unlockedColorIndex, 
+        completedPixels: currentState.completedPixels 
+    }]);
+    setFuture([]);
+  }, []);
+
   const handlePaintPixels = useCallback((indices: number[]) => {
     const currentState = gameStateRef.current;
     if (currentState.stage !== 'playing') return;
 
-    // Filter for valid moves to see if we need to save history
+    // Filter for valid moves
     const validMoves = indices.filter(i => {
         const p = currentState.grid[i];
         return p && !p.isColored && p.colorIndex === currentState.activeColorIndex;
@@ -643,14 +657,9 @@ const App: React.FC = () => {
 
     setHintPixelIndex(null);
     
-    // Save history state
-    setPast(prev => [...prev, { 
-        grid: currentState.grid, 
-        activeColorIndex: currentState.activeColorIndex, 
-        unlockedColorIndex: currentState.unlockedColorIndex, 
-        completedPixels: currentState.completedPixels 
-    }]);
-    setFuture([]);
+    // PERFORMANCE OPTIMIZATION:
+    // We do NOT save history here anymore. History is saved once per stroke in handlePaintStrokeStart.
+    // This allows the drag operation to be much lighter and fluid.
 
     // Apply updates
     setGameState(prev => {
@@ -658,7 +667,6 @@ const App: React.FC = () => {
         let added = 0;
         
         validMoves.forEach(i => {
-            // Re-check in case multiple events fired (paranoia, but good)
             if (!newGrid[i].isColored && newGrid[i].colorIndex === prev.activeColorIndex) {
                 newGrid[i] = { ...newGrid[i], isColored: true };
                 added++;
@@ -670,24 +678,18 @@ const App: React.FC = () => {
         const newCompleted = prev.completedPixels + added;
         
         // Smart Cycle Logic: Find the next incomplete color (wrapping around)
-        // 1. Is the current color finished?
         const isCurrentColorFinished = !newGrid.some(p => p.colorIndex === prev.activeColorIndex && !p.isColored);
         
         let newActive = prev.activeColorIndex;
 
         if (isCurrentColorFinished && newCompleted < prev.totalPixels) {
-            // Find next incomplete color starting from next index
             let nextIndex = -1;
-            
-            // Look forward
             for (let i = prev.activeColorIndex + 1; i < prev.palette.length; i++) {
                 if (newGrid.some(p => p.colorIndex === i && !p.isColored)) {
                     nextIndex = i;
                     break;
                 }
             }
-
-            // If not found, wrap around and look from 0 up to current
             if (nextIndex === -1) {
                 for (let i = 0; i < prev.activeColorIndex; i++) {
                      if (newGrid.some(p => p.colorIndex === i && !p.isColored)) {
@@ -696,7 +698,6 @@ const App: React.FC = () => {
                     }
                 }
             }
-
             if (nextIndex !== -1) {
                 newActive = nextIndex;
             }
@@ -905,411 +906,6 @@ const App: React.FC = () => {
     );
   }
 
-  // --- Render Helpers ---
-
-  const HexButton = ({ category, onClick, className = '' }: any) => {
-    // Bubbly Rounded Hexagon Mask
-    const maskImage = `url("data:image/svg+xml,%3Csvg viewBox='0 0 100 115' xmlns='http://www.w3.org/2000/svg'%3E%3Cpath d='M40 8 Q50 0 60 8 L90 23 Q100 28 100 40 L100 75 Q100 87 90 92 L60 107 Q50 115 40 107 L10 92 Q0 87 0 75 L0 40 Q0 28 10 23 Z' fill='black'/%3E%3C/svg%3E")`;
-
-    return (
-      <button
-        onClick={onClick}
-        disabled={timeLeft > 0}
-        className={`
-          relative w-32 h-36 sm:w-40 sm:h-44 flex-shrink-0 
-          transition-transform duration-300 hover:scale-110 active:scale-95 z-10
-          hover:z-20 group
-          disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed disabled:transform-none
-          ${className}
-        `}
-        style={{
-          marginBottom: '-2rem', // Negative margin for stacking
-          marginLeft: '0.5rem',
-          marginRight: '0.5rem'
-        }}
-      >
-        <div 
-           className={`w-full h-full filter drop-shadow-xl transition-all duration-300 group-hover:drop-shadow-2xl`}
-        >
-            <div
-                className={`w-full h-full ${category.bgColor} flex flex-col items-center justify-center ${category.textColor} relative overflow-hidden`}
-                style={{
-                    maskImage,
-                    WebkitMaskImage: maskImage,
-                    maskSize: '100% 100%',
-                    WebkitMaskSize: '100% 100%',
-                    maskRepeat: 'no-repeat',
-                    WebkitMaskRepeat: 'no-repeat'
-                }}
-            >
-                {/* Glossy Highlight */}
-                <div className="absolute inset-0 bg-[radial-gradient(circle_at_30%_30%,rgba(255,255,255,0.4),transparent_60%)]" />
-                
-                <span className="text-6xl sm:text-7xl mb-1 filter drop-shadow-sm transform group-hover:rotate-6 transition-transform">{category.emoji}</span>
-                <span className="font-black text-xs sm:text-sm uppercase tracking-wide drop-shadow-md">{category.label}</span>
-            </div>
-        </div>
-      </button>
-    );
-  };
-
-  const renderCategoryHexGrid = () => {
-    // Mapping: Center = Animals (0), surrounded by others
-    // Top Row: Fantasy(1), Space(2)
-    // Middle Row: Nature(6), Animals(0), Vehicles(3)
-    // Bottom Row: Sports(5), Food(4)
-    
-    // Safety check in case CATEGORIES changes
-    if (CATEGORIES.length < 7) return <div>Config Error</div>;
-
-    const c = CATEGORIES; // Alias
-
-    return (
-      <div className="flex flex-col items-center justify-center py-6 animate-fade-in-up">
-        {/* Top Row */}
-        <div className="flex justify-center -mb-6 z-0">
-           <HexButton category={c[1]} onClick={() => handleSelectCategory(c[1].id)} />
-           <HexButton category={c[2]} onClick={() => handleSelectCategory(c[2].id)} />
-        </div>
-        
-        {/* Middle Row */}
-        <div className="flex justify-center -mb-6 z-10">
-           <HexButton category={c[6]} onClick={() => handleSelectCategory(c[6].id)} />
-           <HexButton category={c[0]} onClick={() => handleSelectCategory(c[0].id)} className="z-30 scale-110 hover:scale-125" />
-           <HexButton category={c[3]} onClick={() => handleSelectCategory(c[3].id)} />
-        </div>
-
-        {/* Bottom Row */}
-        <div className="flex justify-center z-0">
-           <HexButton category={c[5]} onClick={() => handleSelectCategory(c[5].id)} />
-           <HexButton category={c[4]} onClick={() => handleSelectCategory(c[4].id)} />
-        </div>
-      </div>
-    );
-  };
-
-  const renderSettings = () => (
-    <div className="bg-slate-50 p-6 rounded-2xl border-2 border-slate-100 mt-8 animate-fade-in-up">
-      <div className="flex items-center gap-2 mb-6 border-b border-slate-200 pb-4">
-        <span className="text-2xl">⚙️</span>
-        <h3 className="font-bold text-slate-700 text-lg">Game Setup</h3>
-      </div>
-      
-      {/* Art Style Selection */}
-      <div className="mb-8">
-        <label className="text-xs font-bold text-slate-400 uppercase mb-3 block tracking-wider">Art Style</label>
-        <div className="grid grid-cols-3 sm:grid-cols-5 gap-3">
-          {STYLES.map(style => (
-            <button
-              key={style.id}
-              onClick={() => setGameState(s => ({ ...s, style: style.id }))}
-              className={`
-                group relative flex flex-col items-center justify-center p-2 rounded-2xl border-2 transition-all duration-200 ease-out
-                ${gameState.style === style.id 
-                  ? 'bg-white border-indigo-500 shadow-lg ring-2 ring-indigo-100 -translate-y-1 z-10' 
-                  : 'bg-white border-slate-200 text-slate-400 hover:border-indigo-300 hover:bg-slate-50 hover:-translate-y-0.5'}
-              `}
-            >
-              <span className="text-5xl mb-2 filter drop-shadow-sm transform transition-transform group-hover:scale-110 leading-normal">{style.emoji}</span>
-              <span className={`text-[10px] font-black uppercase tracking-wide transition-colors ${gameState.style === style.id ? 'text-indigo-600' : 'text-slate-400'}`}>
-                {style.label}
-              </span>
-              {gameState.style === style.id && (
-                 <div className="absolute -top-2 -right-2 bg-indigo-500 text-white rounded-full w-5 h-5 flex items-center justify-center shadow-md animate-bounce-small">
-                   <svg className="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={3}><path strokeLinecap="round" strokeLinejoin="round" d="M5 13l4 4L19 7" /></svg>
-                 </div>
-              )}
-            </button>
-          ))}
-        </div>
-      </div>
-      
-      {/* Canvas Size (Previously Grid Size) */}
-      <div className="mb-6">
-        <label className="text-xs font-bold text-slate-400 uppercase mb-2 block tracking-wider">Canvas Size</label>
-        <div className="flex justify-between gap-2 mt-1 bg-white p-1 rounded-xl border-2 border-slate-100">
-          {[16, 32, 64, 128].map(size => {
-            let label = 'Small';
-            if (size === 32) label = 'Med';
-            if (size === 64) label = 'Big';
-            if (size === 128) label = 'Huge';
-            return (
-                <button
-                key={size}
-                onClick={() => setGameState(s => ({ ...s, gridSize: size }))}
-                className={`flex-1 py-3 rounded-lg text-sm font-bold transition-all ${
-                    gameState.gridSize === size 
-                    ? 'bg-indigo-100 text-indigo-600 shadow-sm ring-1 ring-indigo-200' 
-                    : 'text-slate-400 hover:bg-slate-50 hover:text-slate-500'
-                }`}
-                >
-                {label} <span className="block text-[8px] font-normal opacity-70">{size}x{size}</span>
-                </button>
-            );
-          })}
-        </div>
-      </div>
-
-      {/* Color Count */}
-      <div className="mb-6">
-        <div className="flex justify-between items-center mb-2">
-            <label className="text-xs font-bold text-slate-400 uppercase tracking-wider">Complexity (Colors)</label>
-            <span className="text-xs font-black text-indigo-500 bg-indigo-50 px-2 py-1 rounded-md">{gameState.colorCount} Colors</span>
-        </div>
-        <div className="px-1">
-          <input 
-            type="range" 
-            min="4" 
-            max="32" 
-            step="1"
-            value={gameState.colorCount}
-            onChange={(e) => setGameState(s => ({ ...s, colorCount: parseInt(e.target.value) }))}
-            className="w-full accent-indigo-500 h-2 bg-slate-200 rounded-lg appearance-none cursor-pointer hover:bg-slate-300 transition-colors"
-          />
-        </div>
-        <div className="flex justify-between text-[10px] text-slate-400 font-bold mt-2 px-1">
-            <span>Simple (4)</span>
-            <span>Complex (32)</span>
-        </div>
-      </div>
-
-      {/* Adult Mode Toggle (Updated to standard checkbox) */}
-      <div className="mb-6 flex items-center justify-between bg-white p-3 rounded-xl border-2 border-slate-100">
-        <div className="flex flex-col">
-            <span className="font-bold text-slate-700 text-sm">Transparent Mode</span>
-            <span className="text-[10px] text-slate-400">Show exact AI prompt, tokens & limits</span>
-        </div>
-        <input 
-            type="checkbox"
-            checked={adultMode}
-            onChange={toggleAdultMode}
-            className="w-6 h-6 accent-indigo-500 rounded border-slate-300 focus:ring-indigo-500 cursor-pointer"
-        />
-      </div>
-
-      {/* Key Management */}
-        <div className="border-t border-slate-200 pt-6 mt-6">
-        <button 
-          onClick={handleClearKey}
-          className="w-full py-3 text-xs font-bold text-slate-400 hover:text-red-500 hover:bg-red-50 rounded-xl transition-colors flex items-center justify-center gap-2 group"
-        >
-          <span className="group-hover:scale-110 transition-transform">🔑</span>
-          <span>Reset Magic Key</span>
-        </button>
-      </div>
-    </div>
-  );
-
-  if (gameState.stage === 'input' || gameState.stage === 'processing') {
-    return (
-      <div className="min-h-screen bg-indigo-50 flex flex-col items-center p-4 sm:p-6 overflow-y-auto">
-        <style>
-            {`
-            @keyframes floatUp {
-                0% { transform: translate(-50%, -50%) scale(0.5); opacity: 0; }
-                20% { transform: translate(-50%, -100%) scale(1.2); opacity: 1; }
-                100% { transform: translate(-50%, -300%) scale(1); opacity: 0; }
-            }
-            .animate-float-up {
-                animation: floatUp 0.8s ease-out forwards;
-            }
-            `}
-        </style>
-        {/* Floating Save Icon - Rendered at root of this view to persist briefly during transitions if needed */}
-        {saveAnim && (
-            <div 
-                className="fixed pointer-events-none z-50 animate-float-up text-4xl filter drop-shadow-md"
-                style={{ left: saveAnim.x, top: saveAnim.y }}
-            >
-                💾
-            </div>
-        )}
-
-        <div className="max-w-2xl w-full bg-white rounded-3xl shadow-2xl p-6 relative">
-            {/* Always visible toggle in top right of card (Icon based) */}
-            <button 
-                onClick={toggleAdultMode}
-                className="absolute top-6 right-6 p-2 rounded-full hover:bg-slate-50 transition-colors group z-10"
-                title={adultMode ? "Disable Transparent Mode" : "Enable Transparent Mode"}
-            >
-                <svg 
-                    className={`w-6 h-6 transition-colors ${adultMode ? 'text-indigo-600' : 'text-slate-300 group-hover:text-slate-500'}`} 
-                    fill="none" 
-                    viewBox="0 0 24 24" 
-                    stroke="currentColor"
-                >
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15 12a3 3 0 11-6 0 3 3 0 016 0z" />
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z" />
-                </svg>
-            </button>
-
-          <div className="text-center mb-6">
-            <Logo size="large" className="mb-2" />
-            <span className="text-xs font-bold text-indigo-300 uppercase tracking-widest">{APP_VERSION}</span>
-          </div>
-
-          {/* Cooldown Indicator */}
-          {timeLeft > 0 && (
-            <div className="mb-6 mx-auto max-w-sm bg-orange-50 border-2 border-orange-100 rounded-2xl p-4 flex flex-col items-center shadow-sm animate-pulse">
-                <div className="flex items-center gap-2 mb-2 font-bold text-orange-400">
-                    <span className="animate-bounce">💤</span>
-                    <span>Magic Pencil Recharging...</span>
-                    <span className="text-orange-600 bg-orange-100 px-2 py-0.5 rounded-md font-mono">{timeLeft}s</span>
-                </div>
-                 <div className="w-full h-3 bg-orange-100 rounded-full overflow-hidden">
-                    <div 
-                        className="h-full bg-orange-400 transition-all duration-300 ease-linear"
-                        style={{ width: `${(timeLeft / (COOLDOWN_MS / 1000)) * 100}%` }}
-                    />
-                </div>
-            </div>
-          )}
-
-          {showGallery ? (
-            <div className="animate-fade-in-up">
-               <div className="flex items-center justify-between mb-6">
-                  <div className="flex items-center gap-2">
-                    <button onClick={() => setShowGallery(false)} className="p-2 hover:bg-slate-100 rounded-full text-slate-400"><svg className="w-6 h-6" fill="none" viewBox="0 0 24 24" stroke="currentColor"><path d="M15 19l-7-7 7-7" /></svg></button>
-                    <h3 className="text-2xl font-bold text-slate-700">Gallery</h3>
-                  </div>
-                  <button 
-                    onClick={resetGame}
-                    className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-xl font-bold transition-all"
-                    title="Home"
-                   >
-                    <span>🏠</span>
-                    <span>Home</span>
-                   </button>
-               </div>
-               {savedGames.length === 0 ? <div className="text-center py-10 text-slate-400">Empty!</div> : 
-               <div className="space-y-3">{savedGames.map(s => (
-                  <div key={s.id} onClick={() => loadGame(s)} className="bg-white p-4 rounded-2xl shadow-sm border-2 border-slate-100 flex items-center gap-4 cursor-pointer">
-                      <div className="w-12 h-12 bg-indigo-100 rounded-lg flex items-center justify-center">🎨</div>
-                      <div className="flex-1 font-bold text-slate-700 capitalize">{s.prompt}</div>
-                      <button onClick={(e) => deleteSave(e, s.id)} className="text-red-300 hover:text-red-500">🗑️</button>
-                  </div>
-               ))}</div>}
-            </div>
-          ) : selectedCategory ? (
-            <div>
-              <div className="flex items-center justify-between mb-4">
-                  <button 
-                    onClick={() => handleSelectCategory(null)} 
-                    className="flex items-center gap-2 text-slate-500 hover:text-indigo-600 font-bold transition-colors px-3 py-2 rounded-xl hover:bg-slate-50"
-                  >
-                     <span className="text-xl">←</span> Back
-                  </button>
-                  <h3 className="text-xl font-black text-slate-700">
-                    {CATEGORIES.find(c => c.id === selectedCategory)?.label}
-                  </h3>
-                  <button 
-                    onClick={resetGame}
-                    className="flex items-center gap-2 bg-slate-100 hover:bg-slate-200 text-slate-600 px-4 py-2 rounded-xl font-bold transition-all"
-                    title="Home"
-                   >
-                    <span>🏠</span>
-                    <span>Home</span>
-                   </button>
-              </div>
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
-                {CATEGORIES.find(c => c.id === selectedCategory)?.items.map(i => (
-                  <button 
-                    key={i.label} 
-                    disabled={timeLeft > 0}
-                    onClick={() => handleStart(generateSmartPrompt(selectedCategory, i.label, i.prompt))} 
-                    className="h-40 bg-white border-2 border-slate-100 rounded-3xl hover:border-indigo-300 hover:bg-indigo-50 flex flex-col items-center justify-center transition-all hover:-translate-y-1 shadow-sm hover:shadow-md group disabled:opacity-50 disabled:grayscale disabled:cursor-not-allowed disabled:transform-none disabled:shadow-none"
-                  >
-                    <span className="text-6xl mb-3 transform transition-transform group-hover:scale-110">{i.emoji}</span>
-                    <span className="font-bold text-slate-700 text-lg">{i.label}</span>
-                  </button>
-                ))}
-              </div>
-              {renderSettings()}
-            </div>
-          ) : (
-            <div>
-              <button 
-                onClick={() => setShowGallery(true)} 
-                className={`w-full mb-6 bg-indigo-50 text-indigo-600 font-bold py-3 rounded-xl hover:bg-indigo-100 transition-all duration-300 ${justSaved ? 'scale-105 ring-4 ring-green-400 bg-green-50 text-green-600 shadow-lg' : ''}`}
-              >
-                  {justSaved ? 'Saved to Gallery! 💾' : `View Gallery (${savedGames.length})`}
-              </button>
-              
-              {/* HEX GRID CATEGORY MENU */}
-              {renderCategoryHexGrid()}
-              
-              {renderSettings()}
-            </div>
-          )}
-          
-          {error && (
-            <div className="mt-4 bg-red-50 border-2 border-red-100 text-red-600 p-4 rounded-2xl text-center shadow-sm animate-shake">
-              <p className="font-bold mb-2">{error}</p>
-              {(error.includes("Magic Key") || error.includes("API Key") || error.includes("permission")) && (
-                <button 
-                  onClick={handleClearKey}
-                  className="bg-white text-red-500 border border-red-200 px-4 py-2 rounded-xl text-sm font-bold hover:bg-red-50 transition-colors shadow-sm"
-                >
-                  🔑 Fix Magic Key
-                </button>
-              )}
-            </div>
-          )}
-
-          {/* Loading Overlay - Only show for global loading, not local button saving */}
-          {loading && !isSaving && (
-            <div className="absolute inset-0 bg-white/95 flex flex-col items-center justify-center p-8 rounded-3xl z-20 text-center">
-              {adultMode ? (
-                <div className="max-w-lg w-full text-left font-mono text-xs sm:text-sm bg-slate-900 text-green-400 p-6 rounded-xl shadow-2xl overflow-hidden border border-slate-700 animate-fade-in-up">
-                   <div className="flex justify-between items-center border-b border-slate-700 pb-2 mb-4">
-                      <span className="font-bold text-white tracking-widest">TRANSPARENT MODE</span>
-                      <span className="animate-pulse flex items-center gap-2">
-                        <span className="w-2 h-2 bg-green-500 rounded-full"></span>
-                        PROCESSING
-                      </span>
-                   </div>
-                   <div className="space-y-4">
-                      <div className="grid grid-cols-2 gap-4">
-                        <div>
-                          <span className="text-slate-500 block mb-1 font-bold">MODEL:</span>
-                          <span className="text-yellow-300">{GENERATION_MODEL_NAME}</span>
-                        </div>
-                         <div>
-                          <span className="text-slate-500 block mb-1 font-bold">EST. INPUT TOKENS:</span>
-                          <span className="text-blue-300">~{Math.ceil(constructGenerationPrompt(gameState.prompt, gameState.style).length / 4)}</span>
-                        </div>
-                      </div>
-                      
-                      <div>
-                          <span className="text-slate-500 block mb-1 font-bold">SYSTEM PROMPT:</span>
-                          <div className="whitespace-pre-wrap break-words opacity-90 border-l-2 border-slate-700 pl-3 max-h-32 overflow-y-auto custom-scrollbar">
-                              {constructGenerationPrompt(gameState.prompt, gameState.style)}
-                          </div>
-                      </div>
-
-                      <div className="border-t border-slate-700 pt-2 mt-2">
-                         <span className="text-slate-500 block mb-1 font-bold uppercase">Free Tier Quota (Ref):</span>
-                         <ul className="text-[10px] text-slate-400 list-disc pl-4 space-y-1">
-                            <li>Requests: ~1,500 / Day</li>
-                            <li>Rate: ~15 / Minute</li>
-                            <li><span className="text-green-500">Free of charge</span> (if billing disabled)</li>
-                         </ul>
-                      </div>
-                   </div>
-                </div>
-              ) : (
-                <>
-                  <div className="animate-bounce text-6xl mb-4">✨</div>
-                  <div className="text-xl font-bold text-indigo-600">Making Magic...</div>
-                </>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
-    );
-  }
-
   if (gameState.stage === 'complete') {
     return (
       <div className="min-h-screen bg-indigo-600 flex flex-col items-center justify-center p-4 relative">
@@ -1319,9 +915,15 @@ const App: React.FC = () => {
              {gameState.grid.map((p, i) => <div key={i} style={{ backgroundColor: gameState.palette[p.colorIndex] }} />)}
            </div>
         </div>
-        <div className="flex gap-4">
-          <Button onClick={handleSaveAndHome} variant="primary">Save Picture</Button>
-          <Button onClick={() => setShowRestartConfirm(true)} variant="secondary">Restart</Button>
+        <div className="flex flex-col gap-3 items-center w-full max-w-sm">
+            <div className="flex gap-3 w-full">
+              <Button onClick={handleSaveAndHome} variant="primary" className="flex-1">Save & Exit</Button>
+              <Button onClick={() => setShowRestartConfirm(true)} variant="secondary" className="flex-1">Restart</Button>
+            </div>
+            <button onClick={resetGame} className="text-white/70 hover:text-white font-bold py-2 text-sm transition-colors flex items-center gap-2">
+                <span>🏠</span>
+                <span>Go Home (No Save)</span>
+            </button>
         </div>
 
         {/* Restart Confirmation Modal */}
@@ -1364,7 +966,8 @@ const App: React.FC = () => {
             grid={gameState.grid} 
             gridSize={gameState.gridSize} 
             activeColorIndex={gameState.activeColorIndex} 
-            onPaintPixels={handlePaintPixels} 
+            onPaintPixels={handlePaintPixels}
+            onPaintStrokeStart={handlePaintStrokeStart}
             palette={gameState.palette} 
             hintPixelIndex={hintPixelIndex}
             difficulty={gameState.difficulty}

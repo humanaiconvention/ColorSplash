@@ -6,6 +6,11 @@ ColorSplash is a magical color-by-numbers web application that turns any idea in
 
 ![ColorSplash Icon](https://cdn.jsdelivr.net/npm/twemoji@11.3.0/2/72x72/1f58c.png)
 
+## 🎮 Play Now
+
+You can play the live version here:
+**[https://colorsplash-357116799368.us-west1.run.app/](https://colorsplash-357116799368.us-west1.run.app/)**
+
 ## ✨ Features
 
 *   **Infinite Puzzles:** never run out of coloring pages. Choose from categories like Animals 🦁, Space 🚀, and Fantasy 🦄, or mix them up with dynamic characters.
