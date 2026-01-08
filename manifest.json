@@ -1,0 +1,26 @@
+{
+  "name": "ColorSplash",
+  "short_name": "ColorSplash",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#f8fafc",
+  "theme_color": "#4f46e5",
+  "orientation": "portrait",
+  "icons": [
+    {
+      "src": "https://cdn.jsdelivr.net/npm/twemoji@11.3.0/2/72x72/1f58c.png",
+      "sizes": "72x72",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/npm/twemoji@11.3.0/2/72x72/1f58c.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://cdn.jsdelivr.net/npm/twemoji@11.3.0/2/72x72/1f58c.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

@@ -1,0 +1,5 @@
+{
+  "name": "ColorSplash",
+  "description": "A magical color-by-numbers game for kids where AI generates unique pixel art puzzles from any idea.",
+  "requestFramePermissions": []
+}
